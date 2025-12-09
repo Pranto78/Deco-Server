@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const adminSDK = require("firebase-admin");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -181,7 +181,7 @@ app.get("/me", verifyAdmin, async (req, res) => {
 // --------------------------------------------------------
 //  GET SERVICES (ADMIN + USERS)
 // --------------------------------------------------------
-app.get("/services", async (req, res) => {
+app.get("/services",verifyFirebaseJWT, async (req, res) => {
   try {
     const list = await servicesCollection.find().toArray();
     res.send(list);
@@ -203,6 +203,19 @@ app.post("/services", verifyAdmin, async (req, res) => {
 
   const result = await servicesCollection.insertOne(service);
   res.send(result);
+});
+
+app.get("/services/:id",verifyFirebaseJWT, async (req, res) => {
+  try {
+    const service = await servicesCollection.findOne({
+      _id: new ObjectId(req.params.id)
+    });
+    if (!service) return res.status(404).json({ message: "Service not found" });
+    res.json(service);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
 
