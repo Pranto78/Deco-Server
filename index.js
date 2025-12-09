@@ -6,6 +6,8 @@ const adminSDK = require("firebase-admin");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -16,7 +18,9 @@ app.use(cors());
 //  FIREBASE ADMIN INIT
 // --------------------------------------------------------
 try {
-  const decodedKey = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString("utf8");
+  const decodedKey = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+    "utf8"
+  );
   const serviceAccount = JSON.parse(decodedKey);
 
   adminSDK.initializeApp({
@@ -66,7 +70,7 @@ async function run() {
     adminCollection = db.collection("admins");
     usersCollection = db.collection("users");
     decoratorsCollection = db.collection("decorators");
-    reviewsCollection = db.collection("reviews"); 
+    reviewsCollection = db.collection("reviews");
     bookingCollections = db.collection("bookings");
 
     console.log("MongoDB Connected Successfully");
@@ -183,7 +187,7 @@ app.get("/me", verifyAdmin, async (req, res) => {
 // --------------------------------------------------------
 //  GET SERVICES (ADMIN + USERS)
 // --------------------------------------------------------
-app.get("/services",verifyFirebaseJWT, async (req, res) => {
+app.get("/services", async (req, res) => {
   try {
     const list = await servicesCollection.find().toArray();
     res.send(list);
@@ -207,10 +211,10 @@ app.post("/services", verifyAdmin, async (req, res) => {
   res.send(result);
 });
 
-app.get("/services/:id",verifyFirebaseJWT, async (req, res) => {
+app.get("/services/:id", verifyFirebaseJWT, verifyAdmin, async (req, res) => {
   try {
     const service = await servicesCollection.findOne({
-      _id: new ObjectId(req.params.id)
+      _id: new ObjectId(req.params.id),
     });
     if (!service) return res.status(404).json({ message: "Service not found" });
     res.json(service);
@@ -219,7 +223,6 @@ app.get("/services/:id",verifyFirebaseJWT, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-
 
 // Add a review (Firebase verified user)
 app.post("/services/:id/review", verifyFirebaseJWT, async (req, res) => {
@@ -245,8 +248,7 @@ app.post("/services/:id/review", verifyFirebaseJWT, async (req, res) => {
   }
 });
 
-
-  // --------------------------------------------------------
+// --------------------------------------------------------
 // --------------------------------------------------------
 //  ADD BOOKING (Firebase JWT Verified User)
 // --------------------------------------------------------
@@ -276,7 +278,54 @@ app.post("/bookings", verifyFirebaseJWT, async (req, res) => {
   }
 });
 
+// --------------------------------------------------------
+//  GET USER BOOKINGS (Firebase JWT Verified User)
+// --------------------------------------------------------
+app.get("/bookings", verifyFirebaseJWT, async (req, res) => {
+  const userEmail = req.user.email;
 
+  try {
+    const list = await bookingCollections
+      .find({ userEmail })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(list);
+  } catch (error) {
+    console.error("Booking fetch error:", error);
+    res.status(500).send({ message: "Failed to fetch bookings" });
+  }
+});
+
+// payment
+
+app.post("/create-checkout-session", async (req, res) => {
+  const paymentInfo = req.body;
+  const amount = parseInt(paymentInfo.cost) * 100;
+  const session = await stripe.checkout.sessions.create({
+    line_items: [
+      {
+        price_data: {
+          currency: "bdt",
+          unit_amount: amount,
+          product_data: {
+            name: paymentInfo.serviceName,
+          },
+        },
+        quantity: 1,
+      },
+    ],
+    customer_email: paymentInfo.senderEmail,
+    mode: "payment",
+    metadata: {
+      bookId: paymentInfo.bookId,
+    },
+    success_url: `${process.env.SITE_HOST}/dashboard/payment-success`,
+    cancel_url: `${process.env.SITE_HOST}/dashboard/payment-cancelled`,
+  });
+
+  res.send({ url: session.url });
+});
 
 app.get("/services/:id/reviews", async (req, res) => {
   const { id } = req.params;
@@ -291,7 +340,6 @@ app.get("/services/:id/reviews", async (req, res) => {
     res.status(500).send({ message: "Failed to fetch reviews" });
   }
 });
-
 
 // --------------------------------------------------------
 app.get("/", (req, res) => {
