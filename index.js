@@ -300,6 +300,26 @@ app.delete("/services/:id", verifyAdmin, async (req, res) => {
 });
 
 
+
+// --------------------------------------------------------
+//  ADMIN: GET ALL BOOKINGS
+// --------------------------------------------------------
+app.get("/admin/bookings", verifyAdmin, async (req, res) => {
+  try {
+    const list = await bookingCollections
+      .find()
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(list);
+  } catch (error) {
+    console.error("Admin Booking Fetch Error:", error);
+    res.status(500).send({ message: "Failed to fetch all bookings" });
+  }
+});
+
+
+
 // --------------------------------------------------------
 // --------------------------------------------------------
 //  ADD BOOKING (Firebase JWT Verified User)
