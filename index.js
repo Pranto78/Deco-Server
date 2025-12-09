@@ -60,6 +60,7 @@ let usersCollection;
 let decoratorsCollection;
 let reviewsCollection;
 let bookingCollections;
+let paymentCollections;
 
 async function run() {
   try {
@@ -72,6 +73,7 @@ async function run() {
     decoratorsCollection = db.collection("decorators");
     reviewsCollection = db.collection("reviews");
     bookingCollections = db.collection("bookings");
+    paymentCollections = db.collection("payment")
 
     console.log("MongoDB Connected Successfully");
   } catch (error) {
@@ -340,6 +342,41 @@ app.get("/services/:id/reviews", async (req, res) => {
     res.status(500).send({ message: "Failed to fetch reviews" });
   }
 });
+
+
+// --------------------------------------------------------
+//  SAVE PAYMENT (After success)
+// --------------------------------------------------------
+app.post("/payments", verifyFirebaseJWT, async (req, res) => {
+  try {
+    const { bookId, senderEmail, amount, serviceName, transactionId } = req.body;
+
+    const payment = {
+      bookId,
+      senderEmail,
+      amount,
+      serviceName,
+      transactionId,
+      status: "paid",
+      paidAt: new Date(),
+    };
+
+    // store in DB
+    const result = await paymentCollections.insertOne(payment);
+
+    // update booking status
+    await bookingCollections.updateOne(
+      { _id: new ObjectId(bookId) },
+      { $set: { status: "paid" } }
+    );
+
+    res.send({ message: "Payment saved", insertedId: result.insertedId });
+  } catch (error) {
+    console.error("Payment save error:", error);
+    res.status(500).send({ message: "Failed to save payment" });
+  }
+});
+
 
 // --------------------------------------------------------
 app.get("/", (req, res) => {
