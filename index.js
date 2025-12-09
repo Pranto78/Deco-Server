@@ -250,6 +250,56 @@ app.post("/services/:id/review", verifyFirebaseJWT, async (req, res) => {
   }
 });
 
+
+
+// --------------------------------------------------------
+// UPDATE SERVICE (ADMIN ONLY)
+// --------------------------------------------------------
+app.patch("/services/:id", verifyAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const updateData = req.body;
+
+    const updated = await servicesCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateData }
+    );
+
+    if (!updated.modifiedCount) {
+      return res.status(404).send({ message: "Service not found or no changes" });
+    }
+
+    res.send({ message: "Service updated successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Failed to update service" });
+  }
+});
+
+
+// --------------------------------------------------------
+// DELETE SERVICE (ADMIN ONLY)
+// --------------------------------------------------------
+app.delete("/services/:id", verifyAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const deleted = await servicesCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!deleted.deletedCount) {
+      return res.status(404).send({ message: "Service not found" });
+    }
+
+    res.send({ message: "Service deleted successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Failed to delete service" });
+  }
+});
+
+
 // --------------------------------------------------------
 // --------------------------------------------------------
 //  ADD BOOKING (Firebase JWT Verified User)
@@ -310,9 +360,7 @@ app.post("/create-checkout-session", async (req, res) => {
         price_data: {
           currency: "bdt",
           unit_amount: amount,
-          product_data: {
-            name: paymentInfo.serviceName,
-          },
+          product_data: { name: paymentInfo.serviceName },
         },
         quantity: 1,
       },
@@ -321,13 +369,37 @@ app.post("/create-checkout-session", async (req, res) => {
     mode: "payment",
     metadata: {
       bookId: paymentInfo.bookId,
+      serviceName: paymentInfo.serviceName, // add serviceName
     },
-    success_url: `${process.env.SITE_HOST}/dashboard/payment-success`,
+    success_url: `${process.env.SITE_HOST}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${process.env.SITE_HOST}/dashboard/payment-cancelled`,
   });
 
   res.send({ url: session.url });
 });
+
+app.get("/stripe-session/:id", async (req, res) => {
+  try {
+    const sessionId = req.params.id;
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    if (!session) return res.status(404).send({ message: "Session not found" });
+
+    // You can include metadata
+    res.send({
+      status: session.payment_status, // "paid" or "unpaid"
+      bookId: session.metadata.bookId,
+      senderEmail: session.customer_email,
+      amount: session.amount_total / 100,
+      serviceName: session.metadata.serviceName || "Service",
+      transactionId: session.payment_intent,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Failed to fetch Stripe session" });
+  }
+});
+
 
 app.get("/services/:id/reviews", async (req, res) => {
   const { id } = req.params;
@@ -347,9 +419,18 @@ app.get("/services/:id/reviews", async (req, res) => {
 // --------------------------------------------------------
 //  SAVE PAYMENT (After success)
 // --------------------------------------------------------
+// --------------------------------------------------------
+//  SAVE PAYMENT (After success) - FIXED
+// --------------------------------------------------------
 app.post("/payments", verifyFirebaseJWT, async (req, res) => {
   try {
     const { bookId, senderEmail, amount, serviceName, transactionId } = req.body;
+
+    // Check if payment already exists for this booking
+    const existingPayment = await paymentCollections.findOne({ bookId });
+    if (existingPayment) {
+      return res.status(400).send({ message: "Payment already recorded" });
+    }
 
     const payment = {
       bookId,
@@ -376,6 +457,50 @@ app.post("/payments", verifyFirebaseJWT, async (req, res) => {
     res.status(500).send({ message: "Failed to save payment" });
   }
 });
+
+
+
+// --------------------------------------------------------
+//  GET PAYMENT HISTORY
+// --------------------------------------------------------
+app.get("/payments", verifyFirebaseJWT, async (req, res) => {
+  try {
+    const email = req.user.email;
+
+    const payments = await paymentCollections
+      .find({ senderEmail: email })
+      .sort({ paidAt: -1 })
+      .toArray();
+
+    res.send(payments);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch payments" });
+  }
+});
+
+
+
+// --------------------------------------------------------
+//  CANCEL PAYMENT
+// --------------------------------------------------------
+app.patch("/payments/:id/cancel", verifyFirebaseJWT, async (req, res) => {
+  try {
+    const paymentId = req.params.id;
+
+    const updated = await paymentCollections.updateOne(
+      { _id: new ObjectId(paymentId), senderEmail: req.user.email },
+      { $set: { status: "cancelled" } }
+    );
+
+    if (!updated.modifiedCount)
+      return res.status(404).send({ message: "Payment not found" });
+
+    res.send({ message: "Payment cancelled" });
+  } catch (error) {
+    res.status(500).send({ message: "Failed to cancel payment" });
+  }
+});
+
 
 
 // --------------------------------------------------------
