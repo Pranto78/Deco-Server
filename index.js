@@ -55,6 +55,7 @@ let adminCollection;
 let usersCollection;
 let decoratorsCollection;
 let reviewsCollection;
+let bookingCollections;
 
 async function run() {
   try {
@@ -66,6 +67,7 @@ async function run() {
     usersCollection = db.collection("users");
     decoratorsCollection = db.collection("decorators");
     reviewsCollection = db.collection("reviews"); 
+    bookingCollections = db.collection("bookings");
 
     console.log("MongoDB Connected Successfully");
   } catch (error) {
@@ -240,6 +242,37 @@ app.post("/services/:id/review", verifyFirebaseJWT, async (req, res) => {
     res.send({ message: "Review submitted", reviewId: result.insertedId });
   } catch (error) {
     res.status(500).send({ message: "Failed to submit review" });
+  }
+});
+
+
+  // --------------------------------------------------------
+// --------------------------------------------------------
+//  ADD BOOKING (Firebase JWT Verified User)
+// --------------------------------------------------------
+app.post("/bookings", verifyFirebaseJWT, async (req, res) => {
+  const userEmail = req.user.email;
+  const { serviceId, serviceName, cost, bookedAt } = req.body;
+
+  if (!serviceId || !serviceName || !cost || !bookedAt)
+    return res.status(400).send({ message: "All booking fields are required" });
+
+  const booking = {
+    userEmail,
+    serviceId,
+    serviceName,
+    cost,
+    bookedAt: new Date(bookedAt),
+    status: "pending",
+    createdAt: new Date(),
+  };
+
+  try {
+    const result = await bookingCollections.insertOne(booking);
+    res.send({ message: "Booking successful", bookingId: result.insertedId });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: "Failed to create booking" });
   }
 });
 
