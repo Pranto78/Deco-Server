@@ -522,6 +522,48 @@ app.patch("/payments/:id/cancel", verifyFirebaseJWT, async (req, res) => {
 });
 
 
+// --------------------------------------------------------
+//  SAVE USER TO DB (when registering / google login)
+// --------------------------------------------------------
+app.post("/save-user", async (req, res) => {
+  try {
+    const user = req.body; // { name, email, photo }
+    if (!user?.email) return res.status(400).send({ message: "Email missing" });
+
+    const exists = await usersCollection.findOne({ email: user.email });
+    if (exists) return res.send({ message: "User already exists", existed: true });
+
+    const newUser = {
+      name: user.name || "",
+      email: user.email,
+      photo: user.photo || null,
+      role: "user",
+      createdAt: new Date(),
+    };
+
+    const result = await usersCollection.insertOne(newUser);
+    res.send({ message: "User added to DB", insertedId: result.insertedId });
+  } catch (error) {
+    console.error("Save user error:", error);
+    res.status(500).send({ message: "Failed to save user" });
+  }
+});
+
+
+// --------------------------------------------------------
+//  ADMIN: GET ALL USERS
+// --------------------------------------------------------
+app.get("/admin/users", verifyAdmin, async (req, res) => {
+  try {
+    const users = await usersCollection.find().sort({ createdAt: -1 }).toArray();
+    res.send(users);
+  } catch (error) {
+    console.error("Failed to fetch users:", error);
+    res.status(500).send({ message: "Failed to load users" });
+  }
+});
+
+
 
 // --------------------------------------------------------
 app.get("/", (req, res) => {
