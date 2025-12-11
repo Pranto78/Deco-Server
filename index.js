@@ -190,55 +190,41 @@ app.get("/admin/users", verifyAdmin, async (req, res) => {
 // ========================================================
 // 2. MAKE USER → DECORATOR
 // ========================================================
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 app.patch(
   "/admin/users/:email/make-decorator",
   verifyAdmin,
   async (req, res) => {
     try {
       const { email } = req.params;
-      const { specialties } = req.body; // optional from modal
+      const { specialties } = req.body;
 
-      const allSpecialties = [
-        "Wedding Planner",
-        "Birthday Planner",
-        "Corporate Event Planner",
-        "Home Decoration",
-        "Concert & Stage Planner",
-        "Outdoor Events",
-        "Floral Designer",
-        "Theme Specialist",
-      ];
+      const user = await usersCollection.findOne({
+        email: { $regex: `^${escapeRegex(email)}$`, $options: "i" },
+      });
 
-      // Use provided specialties OR generate random ones
-      const finalSpecialties =
-        Array.isArray(specialties) && specialties.length > 0
-          ? specialties
-          : allSpecialties.sort(() => 0.5 - Math.random()).slice(0, 3);
-
-      const result = await usersCollection.findOneAndUpdate(
-        { email },
-        {
-          $set: {
-            role: "decorator",
-            specialties: finalSpecialties,
-            isActive: true,
-            rating: Math.floor(Math.random() * 2) + 4, // 4.0 to 5.0
-            updatedAt: new Date(),
-          },
-        },
-        { returnDocument: "after" }
-      );
-
-      if (!result.value) {
+      if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
 
-      res.json({
-        message: `${email} is now a DECORATOR with specialties!`,
-        user: result.value,
-      });
-    } catch (error) {
-      console.error(error);
+      const updated = await usersCollection.updateOne(
+        { email: { $regex: `^${escapeRegex(email)}$`, $options: "i" } },
+        {
+          $set: {
+            role: "decorator",
+            specialties,
+            isActive: true,
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      res.json({ message: "User promoted to decorator" });
+    } catch (err) {
+      console.error(err);
       res.status(500).json({ message: "Server error" });
     }
   }
@@ -359,6 +345,33 @@ app.get("/me", async (req, res) => {
     return res.send({ role: "guest" });
   }
 });
+
+
+// ================
+
+// CHECK IF USER IS DECORATOR
+app.get("/users/decorator/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+
+    const user = await usersCollection.findOne({
+      email: { $regex: `^${email}$`, $options: "i" }
+    });
+
+    if (!user) {
+      return res.status(404).json({ decorator: false });
+    }
+
+    return res.json({ decorator: user.role === "decorator" });
+  } catch (error) {
+    console.error("Decorator check error:", error);
+    res.status(500).json({ decorator: false });
+  }
+});
+
+
+
+// ===============
 
 // --------------------------------------------------------
 //  GET SERVICES (ADMIN + USERS)
@@ -657,20 +670,29 @@ app.post("/payments", verifyFirebaseJWT, async (req, res) => {
 // --------------------------------------------------------
 //  GET PAYMENT HISTORY
 // --------------------------------------------------------
-app.get("/payments", verifyFirebaseJWT, async (req, res) => {
+app.get("/payments", verifyAdmin, verifyFirebaseJWT, async (req, res) => {
   try {
-    const email = req.user.email;
+    let filter = {};
+
+    // Admin sees all payments
+    if (req.user.role !== "admin") {
+      // Normal user sees only their own payments
+      filter.senderEmail = req.user.email;
+    }
 
     const payments = await paymentCollections
-      .find({ senderEmail: email })
+      .find(filter)
       .sort({ paidAt: -1 })
       .toArray();
 
     res.send(payments);
   } catch (error) {
+    console.error("Failed to fetch payments:", error);
     res.status(500).send({ message: "Failed to fetch payments" });
   }
 });
+
+
 
 
 
@@ -697,35 +719,37 @@ app.patch("/payments/:id/cancel", verifyFirebaseJWT, async (req, res) => {
 
 
 // Assign a user as decorator (Admin only)
+// ASSIGN DECORATOR TO A BOOKING
 app.post("/admin/assign-decorator", verifyAdmin, async (req, res) => {
-  const { email, bookingId } = req.body;
-
-  if (!email || !bookingId)
-    return res.status(400).send({ message: "Email and bookingId required" });
-
   try {
-    // Check if already a decorator
-    const exists = await decoratorsCollection.findOne({ email });
-    if (!exists) {
-      await decoratorsCollection.insertOne({
-        email,
-        role: "decorator",
-        createdAt: new Date(),
-      });
+    const { bookingId, decoratorEmail } = req.body;
+
+    const booking = await bookingCollections.findOne({
+      _id: new ObjectId(bookingId),
+    });
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
     }
 
-    // Mark the booking as assigned
     await bookingCollections.updateOne(
       { _id: new ObjectId(bookingId) },
-      { $set: { decoratorAssigned: true } }
+      {
+        $set: {
+          decoratorEmail,
+          decoratorAssigned: true,
+          assignedAt: new Date(),
+        },
+      }
     );
 
-    res.send({ message: `${email} promoted to decorator` });
+    res.json({ message: "Decorator assigned successfully" });
   } catch (error) {
     console.error(error);
-    res.status(500).send({ message: "Failed to assign decorator" });
+    res.status(500).json({ message: "Server error" });
   }
 });
+
 
 
 
