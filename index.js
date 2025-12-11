@@ -103,26 +103,29 @@ const verifyAdmin = async (req, res, next) => {
 //  FIREBASE VERIFY (Normal Users)
 // --------------------------------------------------------
 const verifyFirebaseJWT = async (req, res, next) => {
-  if (req.user) return next(); // Already admin
+  if (req.user) return next();
 
   const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).send({ message: "Unauthorized!" });
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
 
   const token = authHeader.split(" ")[1];
 
   try {
     const decoded = await adminSDK.auth().verifyIdToken(token);
-    const email = decoded.email;
+    req.user = { email: decoded.email, role: "user" };
 
-    const dbUser = await usersCollection.findOne({ email });
-    req.user = {
-      email,
-      role: dbUser?.role || "user",
-    };
+    // Safely check DB only if collection exists
+    if (usersCollection) {
+      const dbUser = await usersCollection.findOne({ email: decoded.email });
+      if (dbUser?.role) req.user.role = dbUser.role;
+    }
 
     next();
   } catch (error) {
-    return res.status(403).send({ message: "Invalid Firebase token" });
+    console.error("Token verification failed:", error.code || error.message);
+    return res.status(401).json({ message: "Invalid or expired token" });
   }
 };
 
@@ -407,18 +410,23 @@ app.post("/services", verifyAdmin, async (req, res) => {
   res.send(result);
 });
 
-app.get("/services/:id", verifyFirebaseJWT, verifyAdmin, async (req, res) => {
+app.get("/services/:id", async (req, res) => {
   try {
     const service = await servicesCollection.findOne({
       _id: new ObjectId(req.params.id),
     });
-    if (!service) return res.status(404).json({ message: "Service not found" });
+
+    if (!service) {
+      return res.status(404).json({ message: "Service not found" });
+    }
+
     res.json(service);
   } catch (error) {
-    console.error(error);
+    console.error("Service error:", error);
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 // Add a review (Firebase verified user)
 app.post("/services/:id/review", verifyFirebaseJWT, async (req, res) => {
@@ -964,8 +972,12 @@ app.get("/", (req, res) => {
 });
 
 // START SERVER ONLY AFTER DATABASE IS CONNECTED
-run().then(() => {
-  app.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}`);
+run()
+  .then(() => {
+    app.listen(port, () => {
+      console.log(`Server running on http://localhost:${port}`);
+    });
+  })
+  .catch((err) => {
+    console.error("Failed to connect to MongoDB", err);
   });
-});
