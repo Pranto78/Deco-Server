@@ -112,7 +112,14 @@ const verifyFirebaseJWT = async (req, res, next) => {
 
   try {
     const decoded = await adminSDK.auth().verifyIdToken(token);
-    req.user = decoded;
+    const email = decoded.email;
+
+    const dbUser = await usersCollection.findOne({ email });
+    req.user = {
+      email,
+      role: dbUser?.role || "user",
+    };
+
     next();
   } catch (error) {
     return res.status(403).send({ message: "Invalid Firebase token" });
@@ -672,12 +679,13 @@ app.post("/payments", verifyFirebaseJWT, async (req, res) => {
 // --------------------------------------------------------
 app.get("/payments", verifyAdmin, verifyFirebaseJWT, async (req, res) => {
   try {
+    if (!req.user) return res.status(401).send({ message: "Unauthorized" });
+
     let filter = {};
 
     // Admin sees all payments
     if (req.user.role !== "admin") {
-      // Normal user sees only their own payments
-      filter.senderEmail = req.user.email;
+      filter.senderEmail = req.user.email; // normal user sees only theirs
     }
 
     const payments = await paymentCollections
@@ -691,6 +699,38 @@ app.get("/payments", verifyAdmin, verifyFirebaseJWT, async (req, res) => {
     res.status(500).send({ message: "Failed to fetch payments" });
   }
 });
+
+
+// GET PAYMENTS FOR DECORATOR'S ASSIGNED BOOKINGS
+app.get("/decorator/payments", verifyFirebaseJWT, async (req, res) => {
+  try {
+    if (req.user.role !== "decorator") {
+      return res.status(403).send({ message: "Only decorators can access this" });
+    }
+
+    const decoratorEmail = req.user.email;
+
+    // Find all bookings assigned to this decorator
+    const assignedBookings = await bookingCollections
+      .find({ decoratorEmail, status: "paid" })
+      .toArray();
+
+    const bookingIds = assignedBookings.map(b => b._id);
+
+    // Get payments linked to those booking IDs
+    const payments = await paymentCollections
+      .find({ bookId: { $in: bookingIds.map(id => id.toString()) } })
+      .sort({ paidAt: -1 })
+      .toArray();
+
+    // Enhance payments with service name (already has it), or add booking date if needed
+    res.send(payments);
+  } catch (error) {
+    console.error("Decorator payments fetch error:", error);
+    res.status(500).send({ message: "Failed to fetch earnings" });
+  }
+});
+
 
 
 
@@ -720,9 +760,10 @@ app.patch("/payments/:id/cancel", verifyFirebaseJWT, async (req, res) => {
 
 // Assign a user as decorator (Admin only)
 // ASSIGN DECORATOR TO A BOOKING
+// ASSIGN DECORATOR TO A BOOKING
 app.post("/admin/assign-decorator", verifyAdmin, async (req, res) => {
   try {
-    const { bookingId, decoratorEmail } = req.body;
+    const { bookingId, email } = req.body;
 
     const booking = await bookingCollections.findOne({
       _id: new ObjectId(bookingId),
@@ -732,23 +773,64 @@ app.post("/admin/assign-decorator", verifyAdmin, async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
+    // Assign decorator
     await bookingCollections.updateOne(
       { _id: new ObjectId(bookingId) },
       {
         $set: {
-          decoratorEmail,
+          decoratorEmail: email,
           decoratorAssigned: true,
-          assignedAt: new Date(),
+          assignedAt: new Date()
         },
       }
     );
 
     res.json({ message: "Decorator assigned successfully" });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Assign Decorator Error:", error);
+    res.status(500).json({ message: "Failed to assign decorator" });
   }
 });
+
+
+
+
+app.get("/decorator/projects", verifyFirebaseJWT, async (req, res) => {
+  try {
+    const email = req.user.email;
+
+    // Find bookings assigned to this decorator
+    const projects = await bookingCollections
+      .find({ decoratorEmail: email })
+      .sort({ assignedAt: -1 })
+      .toArray();
+
+    res.json(projects);
+  } catch (err) {
+    console.error("Decorator Projects Error:", err);
+    res.status(500).json({ message: "Failed to load assigned projects" });
+  }
+});
+
+
+// UPDATE PROJECT STATUS (Decorator only)
+app.patch("/decorator/update-status/:id", verifyFirebaseJWT, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { projectStatus } = req.body;
+
+    const updated = await bookingCollections.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { projectStatus } }
+    );
+
+    res.json({ message: "Status updated" });
+  } catch (err) {
+    console.error("Status Update Error:", err);
+    res.status(500).json({ message: "Failed to update status" });
+  }
+});
+
 
 
 
