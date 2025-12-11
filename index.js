@@ -513,6 +513,50 @@ app.get("/admin/bookings", verifyAdmin, async (req, res) => {
 });
 
 
+// DELETE booking (Admin only)
+app.delete("/admin/bookings/:id", verifyAdmin, async (req, res) => {
+  try {
+    const bookingId = req.params.id;
+
+    const deleted = await bookingCollections.deleteOne({
+      _id: new ObjectId(bookingId),
+    });
+
+    if (!deleted.deletedCount)
+      return res.status(404).send({ message: "Booking not found" });
+
+    res.send({ message: "Booking deleted successfully" });
+  } catch (err) {
+    console.error("Booking delete error:", err);
+    res.status(500).send({ message: "Failed to delete booking" });
+  }
+});
+
+
+
+// UPDATE booking (Admin only)
+app.put("/admin/bookings/:id", verifyAdmin, async (req, res) => {
+  try {
+    const bookingId = req.params.id;
+    const updateData = req.body; // e.g., { status: "paid" }
+
+    const updated = await bookingCollections.updateOne(
+      { _id: new ObjectId(bookingId) },
+      { $set: updateData }
+    );
+
+    if (!updated.matchedCount)
+      return res.status(404).send({ message: "Booking not found" });
+
+    res.send({ message: "Booking updated successfully" });
+  } catch (err) {
+    console.error("Booking update error:", err);
+    res.status(500).send({ message: "Failed to update booking" });
+  }
+});
+
+
+
 
 // --------------------------------------------------------
 // --------------------------------------------------------
