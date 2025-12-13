@@ -81,7 +81,7 @@ async function run() {
   }
 }
 
-run();
+// run();
 
 // --------------------------------------------------------
 //  ADMIN VERIFY (NO FIREBASE)
@@ -355,6 +355,71 @@ app.get("/me", async (req, res) => {
     return res.send({ role: "guest" });
   }
 });
+
+
+
+
+// UPDATE DECORATOR SPECIALTIES (ADMIN)
+app.patch(
+  "/admin/decorators/:email",
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const { email } = req.params;
+      const { specialties } = req.body;
+
+      if (!specialties || !Array.isArray(specialties)) {
+        return res.status(400).json({ message: "Invalid specialties" });
+      }
+
+      const result = await usersCollection.updateOne(
+        { email, role: "decorator" },
+        {
+          $set: {
+            specialties,
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      if (!result.modifiedCount) {
+        return res
+          .status(404)
+          .json({ message: "Decorator not found" });
+      }
+
+      res.json({ message: "Decorator updated successfully" });
+    } catch (err) {
+      console.error("Update decorator error:", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+
+
+
+// DELETE DECORATOR (ADMIN) → Revert to normal user
+// DELETE DECORATOR (ADMIN) → Remove user completely
+app.delete("/admin/decorators/:email", verifyAdmin, async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const result = await usersCollection.deleteOne({ email });
+
+    if (!result.deletedCount) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({ message: "User deleted successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to delete user" });
+  }
+});
+
+
+
 
 
 // ================
@@ -880,6 +945,47 @@ app.patch("/decorator/update-status/:id", verifyFirebaseJWT, async (req, res) =>
   } catch (err) {
     console.error("Status Update Error:", err);
     res.status(500).json({ message: "Failed to update status" });
+  }
+});
+
+
+// DELETE ASSIGNED PROJECT (Decorator only)
+// DELETE ASSIGNED PROJECT → Actually: Unassign decorator (SAFE)
+// In your server.js file, update the DELETE route for /decorator/projects/:id as follows:
+// DELETE ASSIGNED PROJECT
+app.delete("/decorator/projects/:id", verifyFirebaseJWT, async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    // ensure valid ObjectId
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid project ID" });
+    }
+
+    const email = req.user.email;
+
+    const result = await bookingCollections.updateOne(
+      { _id: new ObjectId(id), decoratorEmail: email },
+      {
+        $unset: {
+          decoratorEmail: "",
+          decoratorAssigned: "",
+          assignedAt: "",
+          projectStatus: "",
+        },
+      }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({
+        message: "Project not found or not assigned to you",
+      });
+    }
+
+    res.json({ message: "Assignment removed successfully" });
+  } catch (err) {
+    console.error("DELETE decorator project error:", err);
+    res.status(500).json({ message: "Server error" });
   }
 });
 
