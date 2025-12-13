@@ -64,7 +64,7 @@ let paymentCollections;
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
 
     const db = client.db("Style_Deco_db");
     servicesCollection = db.collection("services");
@@ -955,15 +955,6 @@ app.post("/api/register-user", verifyFirebaseJWT, async (req, res) => {
     res.status(500).send({ message: "Failed to register user" });
   }
 });
-
-
-
-
-
-
-
-
-
 
 
 // --------------------------------------------------------
